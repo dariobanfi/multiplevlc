@@ -1,4 +1,4 @@
-LibVLC on Android demo
+LibVLC on Android demo with multiple instances
 ======================
 
 This is a sample application demonstrating the use of libVLC on Android.
