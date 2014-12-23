@@ -1,7 +1,7 @@
 /*****************************************************************************
  * LibVlcUtil.java
  *****************************************************************************
- * Copyright © 2011-2013 VLC authors and VideoLAN
+ * Copyright © 2011-2014 VLC authors and VideoLAN
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by
@@ -38,6 +38,60 @@ import android.util.Log;
 
 public class LibVlcUtil {
     public final static String TAG = "VLC/LibVLC/Util";
+
+    public static boolean libraryLoaded = false;
+
+    /* Load library before object instantiation */
+    static {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.GINGERBREAD_MR1) {
+            try {
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR1)
+                    System.loadLibrary("anw.10");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR2)
+                    System.loadLibrary("anw.13");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1)
+                    System.loadLibrary("anw.14");
+                else
+                    System.loadLibrary("anw.18");
+            } catch (Throwable t) {
+                Log.w(TAG, "Unable to load the anw library: " + t);
+            }
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.GINGERBREAD_MR1)
+                System.loadLibrary("iomx.10");
+            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR2)
+                System.loadLibrary("iomx.13");
+            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1)
+                System.loadLibrary("iomx.14");
+            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2)
+                System.loadLibrary("iomx.18");
+            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT)
+                System.loadLibrary("iomx.19");
+        } catch (Throwable t) {
+            // No need to warn if it isn't found, when we intentionally don't build these except for debug
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1)
+                Log.w(TAG, "Unable to load the iomx library: " + t);
+        }
+        try {
+            System.loadLibrary("vlcjni");
+        } catch (UnsatisfiedLinkError ule) {
+            Log.e(TAG, "Can't load vlcjni library: " + ule);
+            /// FIXME Alert user
+            System.exit(1);
+        } catch (SecurityException se) {
+            Log.e(TAG, "Encountered a security issue when loading vlcjni library: " + se);
+            /// FIXME Alert user
+            System.exit(1);
+        }
+
+        libraryLoaded = true;
+    }
+
+    public static boolean isLibraryLoaded() {
+        return libraryLoaded;
+    }
 
     public static boolean isFroyoOrLater()
     {
@@ -77,6 +131,11 @@ public class LibVlcUtil {
     public static boolean isKitKatOrLater()
     {
         return android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT;
+    }
+
+    public static boolean isLolliPopOrLater()
+    {
+        return android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP;
     }
 
     private static String errorMsg = null;

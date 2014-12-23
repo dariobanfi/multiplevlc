@@ -32,7 +32,7 @@ public class EventHandler {
      * Be sure to subscribe to events you need in the JNI too.
      */
 
-    //public static final int MediaMetaChanged                = 0;
+    public static final int MediaMetaChanged                  = 0;
     //public static final int MediaSubItemAdded               = 1;
     //public static final int MediaDurationChanged            = 2;
     public static final int MediaParsedChanged                = 3;
@@ -97,17 +97,23 @@ public class EventHandler {
     public static final int HardwareAccelerationError         = 0x3000;
 
     private ArrayList<Handler> mEventHandler;
-    private static EventHandler mInstance;
+    
+    private static EventHandler sInstance;
 
-    EventHandler() {
-        mEventHandler = new ArrayList<Handler>();
-    }
-
-    public static EventHandler getInstance() {
-        if (mInstance == null) {
-            mInstance = new EventHandler();
+    public static EventHandler getInstance(){
+        synchronized (EventHandler.class) {
+            if (sInstance == null) {
+                /* First call */
+                sInstance = new EventHandler();
+            }
         }
-        return mInstance;
+
+        return sInstance;
+    }
+    
+    
+    private EventHandler() {
+        mEventHandler = new ArrayList<Handler>();
     }
 
     public void addHandler(Handler handler) {
@@ -121,16 +127,6 @@ public class EventHandler {
 
     /** This method is called by a native thread **/
     public void callback(int event, Bundle b) {
-        b.putInt("event", event);
-        for (int i = 0; i < mEventHandler.size(); i++) {
-            Message msg = Message.obtain();
-            msg.setData(b);
-            mEventHandler.get(i).sendMessage(msg);
-        }
-    }
-    
-    /** This method is called by a native thread **/
-    public void callback(int event, Bundle b, LibVLC instance) {
         b.putInt("event", event);
         for (int i = 0; i < mEventHandler.size(); i++) {
             Message msg = Message.obtain();

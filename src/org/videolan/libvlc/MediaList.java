@@ -1,7 +1,7 @@
 /*****************************************************************************
  * MediaList.java
  *****************************************************************************
- * Copyright © 2013 VLC authors and VideoLAN
+ * Copyright © 2013-2014 VLC authors and VideoLAN
  * Copyright © 2013 Edward Wang
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -36,12 +36,13 @@ public class MediaList {
         Media m;
         boolean noVideo; // default false
         boolean noHardwareAcceleration; // default false
+        boolean useTcp; // default false
 
         public MediaHolder(Media media) {
-            m = media; noVideo = false; noHardwareAcceleration = false;
+            m = media; noVideo = false; noHardwareAcceleration = false; useTcp = false;
         }
-        public MediaHolder(Media m_, boolean noVideo_, boolean noHardwareAcceleration_) {
-            m = m_; noVideo = noVideo_; noHardwareAcceleration = noHardwareAcceleration_;
+        public MediaHolder(Media m_, boolean noVideo_, boolean noHardwareAcceleration_, boolean useTcp_) {
+            m = m_; noVideo = noVideo_; noHardwareAcceleration = noHardwareAcceleration_; useTcp = useTcp_;
         }
     }
 
@@ -51,7 +52,7 @@ public class MediaList {
     private EventHandler mEventHandler;
 
     public MediaList(LibVLC libVLC) {
-        mEventHandler = new EventHandler(); // used in init() below to fire events at the correct targets
+        mEventHandler = EventHandler.getInstance();
         mInternalList = new ArrayList<MediaHolder>();
         mLibVLC = libVLC;
     }
@@ -68,13 +69,16 @@ public class MediaList {
         add(new Media(mLibVLC, mrl));
     }
     public void add(Media media) {
-        add(media, false, false);
+        add(media, false, false, false);
     }
     public void add(Media media, boolean noVideo) {
-        add(media, noVideo, false);
+        add(media, noVideo, false, false);
     }
     public void add(Media media, boolean noVideo, boolean noHardwareAcceleration) {
-        mInternalList.add(new MediaHolder(media, noVideo, noHardwareAcceleration));
+        add(media, noVideo, false, false);
+    }
+    public void add(Media media, boolean noVideo, boolean noHardwareAcceleration, boolean useTcp) {
+        mInternalList.add(new MediaHolder(media, noVideo, noHardwareAcceleration, useTcp));
         signal_list_event(EventHandler.CustomMediaListItemAdded, mInternalList.size() - 1, media.getLocation());
     }
 
@@ -103,7 +107,7 @@ public class MediaList {
      */
     public int expandMedia(int position) {
         ArrayList<String> children = new ArrayList<String>();
-        int ret = expandMedia(mLibVLC, position, children);
+        int ret = mLibVLC.expandMedia(position, children);
         if(ret == 0) {
             mEventHandler.callback(EventHandler.CustomMediaListExpanding, new Bundle());
             this.remove(position);
@@ -114,17 +118,15 @@ public class MediaList {
         }
         return ret;
     }
-    private native int expandMedia(LibVLC libvlc_instance, int position, ArrayList<String> children);
 
     public void loadPlaylist(String mrl) {
         ArrayList<String> items = new ArrayList<String>();
-        loadPlaylist(mLibVLC, mrl, items);
+        mLibVLC.loadPlaylist(mrl, items);
         this.clear();
         for(String item : items) {
             this.add(item);
         }
     }
-    private native void loadPlaylist(LibVLC libvlc_instance, String mrl, ArrayList<String> items);
 
     public void insert(int position, String mrl) {
         insert(position, new Media(mLibVLC, mrl));
@@ -200,13 +202,15 @@ public class MediaList {
     public String[] getMediaOptions(int position) {
         boolean noHardwareAcceleration = false;
         boolean noVideo = false;
+        boolean useTcp = true;
         if (isValid(position))
         {
             noHardwareAcceleration = mInternalList.get(position).noHardwareAcceleration;
             noVideo = mInternalList.get(position).noVideo;
+            useTcp = mInternalList.get(position).useTcp;
         }
 
-        return mLibVLC.getMediaOptions(noHardwareAcceleration, noVideo);
+        return mLibVLC.getMediaOptions(noHardwareAcceleration, noVideo, useTcp);
     }
 
     public EventHandler getEventHandler() {

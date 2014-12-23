@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.compdigitec.libvlcandroidsample"
+    package="com.ambi.multiplevlc"
     android:versionCode="1"
     android:versionName="1.0" >
 
     <uses-sdk
-        android:minSdkVersion="7"
+        android:minSdkVersion="14"
         android:targetSdkVersion="17" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
@@ -20,7 +20,7 @@
         android:theme="@style/AppTheme" >
 
         <activity
-            android:name="com.compdigitec.libvlcandroidsample.VideoActivity"
+            android:name="com.ambi.multiplevlc.VideoActivity"
             android:configChanges="orientation|screenSize"
             android:label="@string/video">
             

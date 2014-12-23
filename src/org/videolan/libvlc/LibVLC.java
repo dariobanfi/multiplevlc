@@ -1,7 +1,7 @@
 /*****************************************************************************
  * LibVLC.java
  *****************************************************************************
- * Copyright © 2010-2013 VLC authors and VideoLAN
+ * Copyright © 2010-2014 VLC authors and VideoLAN
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by
@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.Map;
 
 import android.content.Context;
-import android.os.Build;
 import android.util.Log;
 import android.view.Surface;
 
@@ -37,6 +36,7 @@ public class LibVLC {
 
     public static final int VOUT_ANDROID_SURFACE = 0;
     public static final int VOUT_OPEGLES2 = 1;
+    public static final int VOUT_ANDROID_WINDOW = 2;
 
     public static final int HW_ACCELERATION_AUTOMATIC = -1;
     public static final int HW_ACCELERATION_DISABLED = 0;
@@ -56,17 +56,16 @@ public class LibVLC {
     public static final int INPUT_NAV_RIGHT = 4;
 
     private static final String DEFAULT_CODEC_LIST = "mediacodec,iomx,all";
+    private static final boolean HAS_WINDOW_VOUT = LibVlcUtil.isGingerbreadOrLater();
 
     private static LibVLC sInstance;
+
+    private final EventHandler eventHandler = EventHandler.getInstance();
 
     /** libVLC instance C pointer */
     private long mLibVlcInstance = 0; // Read-only, reserved for JNI
     /** libvlc_media_player pointer and index */
     private int mInternalMediaPlayerIndex = 0; // Read-only, reserved for JNI
-    private long mInternalMediaPlayerInstance = 0; // Read-only, reserved for JNI
-
-    // Android surface structure
-    private long mAndroidSurfaceValue = 0; // Read-only, reserved for JNI
 
     private MediaList mMediaList; // Pointer to media list being followed
     private MediaList mPrimaryList; // Primary/default media list; see getPrimaryMediaList()
@@ -100,9 +99,6 @@ public class LibVLC {
     /** Path of application-specific cache */
     private String mCachePath = "";
 
-    /** Native crash handler */
-    private OnNativeCrashListener mOnNativeCrashListener;
-
     /** Check in libVLC already initialized otherwise crash */
     private boolean mIsInitialized = false;
     public native void attachSurface(Surface surface, IVideoPlayer player);
@@ -113,37 +109,6 @@ public class LibVLC {
     public native void detachSubtitlesSurface();
 
     public native void eventVideoPlayerActivityCreated(boolean created);
-
-    /* Load library before object instantiation */
-    static {
-        try {
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.GINGERBREAD_MR1)
-                System.loadLibrary("iomx-gingerbread");
-            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR2)
-                System.loadLibrary("iomx-hc");
-            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1)
-                System.loadLibrary("iomx-ics");
-            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2)
-                System.loadLibrary("iomx-jbmr2");
-            else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT)
-                System.loadLibrary("iomx-kk");
-        } catch (Throwable t) {
-            // No need to warn if it isn't found, when we intentionally don't build these except for debug
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1)
-                Log.w(TAG, "Unable to load the iomx library: " + t);
-        }
-        try {
-            System.loadLibrary("vlcjni");
-        } catch (UnsatisfiedLinkError ule) {
-            Log.e(TAG, "Can't load vlcjni library: " + ule);
-            /// FIXME Alert user
-            System.exit(1);
-        } catch (SecurityException se) {
-            Log.e(TAG, "Encountered a security issue when loading vlcjni library: " + se);
-            /// FIXME Alert user
-            System.exit(1);
-        }
-    }
 
     /**
      * Singleton constructor of libVLC Without surface and vout to create the
@@ -180,6 +145,7 @@ public class LibVLC {
      */
     public LibVLC() {
         mAout = new AudioOutput();
+        sInstance = this;
     }
 
     /**
@@ -341,6 +307,8 @@ public class LibVLC {
     }
 
     public boolean isDirectRendering() {
+        if (!HAS_WINDOW_VOUT)
+            return false;
         if (devHardwareDecoder != DEV_HW_DECODER_AUTOMATIC) {
             return (this.devHardwareDecoder == DEV_HW_DECODER_OMX_DR ||
                     this.devHardwareDecoder == DEV_HW_DECODER_MEDIACODEC_DR);
@@ -349,7 +317,7 @@ public class LibVLC {
         }
     }
 
-    public String[] getMediaOptions(boolean noHardwareAcceleration, boolean noVideo) {
+    public String[] getMediaOptions(boolean noHardwareAcceleration, boolean noVideo, boolean useTcp) {
         if (this.devHardwareDecoder != DEV_HW_DECODER_AUTOMATIC)
             noHardwareAcceleration = noVideo = false;
         else if (!noHardwareAcceleration)
@@ -373,6 +341,9 @@ public class LibVLC {
         }
         if (noVideo)
             options.add(":no-video");
+
+        if (useTcp)
+            options.add(":rtsp-tcp");
 
         return options.toArray(new String[options.size()]);
     }
@@ -405,6 +376,12 @@ public class LibVLC {
             this.vout = VOUT_ANDROID_SURFACE;
         else
             this.vout = vout;
+        if (this.vout == VOUT_ANDROID_SURFACE && HAS_WINDOW_VOUT)
+            this.vout = VOUT_ANDROID_WINDOW;
+    }
+
+    public boolean useCompatSurface() {
+        return this.vout != VOUT_ANDROID_WINDOW;
     }
 
     public boolean timeStretchingEnabled() {
@@ -476,9 +453,9 @@ public class LibVLC {
 
     protected void applyEqualizer()
     {
-        setNativeEqualizer(mInternalMediaPlayerInstance, this.equalizer);
+        setNativeEqualizer(this.equalizer);
     }
-    private native int setNativeEqualizer(long mediaPlayer, float[] bands);
+    private native int setNativeEqualizer(float[] bands);
 
     public boolean frameSkipEnabled() {
         return frameSkip;
@@ -514,7 +491,7 @@ public class LibVLC {
     public void init(Context context) throws LibVlcException {
         Log.v(TAG, "Initializing LibVLC");
         mDebugLogBuffer = new StringBuffer();
-        if (!mIsInitialized) {
+        if (LibVlcUtil.isLibraryLoaded() && !mIsInitialized) {
             if(!LibVlcUtil.hasCompatibleCPU(context)) {
                 Log.e(TAG, LibVlcUtil.getErrorMsg());
                 throw new LibVlcException();
@@ -524,7 +501,6 @@ public class LibVLC {
             mCachePath = (cacheDir != null) ? cacheDir.getAbsolutePath() : null;
             nativeInit();
             mMediaList = mPrimaryList = new MediaList(this);
-            setEventHandler(EventHandler.getInstance());
             mIsInitialized = true;
         }
     }
@@ -536,7 +512,6 @@ public class LibVLC {
     public void destroy() {
         Log.v(TAG, "Destroying LibVLC instance");
         nativeDestroy();
-        detachEventHandler();
         mIsInitialized = false;
     }
 
@@ -586,7 +561,7 @@ public class LibVLC {
             return;
         String[] options = mMediaList.getMediaOptions(position);
         mInternalMediaPlayerIndex = position;
-        playMRL(mLibVlcInstance, mrl, options);
+        playMRL(mrl, options);
     }
 
     /**
@@ -598,25 +573,7 @@ public class LibVLC {
         // index=-1 will return options from libvlc instance without relying on MediaList
         String[] options = mMediaList.getMediaOptions(-1);
         mInternalMediaPlayerIndex = 0;
-        playMRL(mLibVlcInstance, mrl, options);
-    }
-
-    public TrackInfo[] readTracksInfo(String mrl) {
-        return readTracksInfo(mLibVlcInstance, mrl);
-    }
-
-    /**
-     * Get a media thumbnail.
-     */
-    public byte[] getThumbnail(String mrl, int i_width, int i_height) {
-        return getThumbnail(mLibVlcInstance, mrl, i_width, i_height);
-    }
-
-    /**
-     * Return true if there is a video track in the file
-     */
-    public boolean hasVideoTrack(String mrl) throws java.io.IOException {
-        return hasVideoTrack(mLibVlcInstance, mrl);
+        playMRL(mrl, options);
     }
 
     /**
@@ -630,6 +587,20 @@ public class LibVLC {
      * Get the current playback speed
      */
     public native float getRate();
+
+    /**
+     * Do pan and digital zoom.
+     *
+     * @param crop_top amount to crop top
+     * @param crop_bottom amount to crop bottom
+     * @param crop_left amount to crop left
+     * @param crop_right amount to crop right
+     */
+    public native void panDigitalZoom(int crop_top, int crop_bottom, int crop_left, int crop_right);
+
+    public native int getWidth();
+
+    public native int getHeight();
 
     /**
      * Initialize the libvlc C library
@@ -663,7 +634,7 @@ public class LibVLC {
     /**
      * Play an mrl
      */
-    private native void playMRL(long instance, String mrl, String[] mediaOptions);
+    private native void playMRL(String mrl, String[] mediaOptions);
 
     /**
      * Returns true if any media is playing
@@ -759,14 +730,14 @@ public class LibVLC {
      * Get a media thumbnail.
      * @return a bytearray with the RGBA thumbnail data inside.
      */
-    private native byte[] getThumbnail(long instance, String mrl, int i_width, int i_height);
+    public native byte[] getThumbnail(String mrl, int i_width, int i_height);
 
     /**
      * Return true if there is a video track in the file
      */
-    private native boolean hasVideoTrack(long instance, String mrl);
+    public native boolean hasVideoTrack(String mrl) throws java.io.IOException;
 
-    private native TrackInfo[] readTracksInfo(long instance, String mrl);
+    public native TrackInfo[] readTracksInfo(String mrl);
 
     public native TrackInfo[] readTracksInfoInternal();
 
@@ -793,7 +764,7 @@ public class LibVLC {
     public native int getSpuTracksCount();
 
     public static native String nativeToURI(String path);
-    
+
     public native static void sendMouseEvent( int action, int button, int x, int y);
 
     /**
@@ -834,27 +805,14 @@ public class LibVLC {
         return mMediaList.expandMedia(mInternalMediaPlayerIndex);
     }
 
-    private native void setEventHandler(EventHandler eventHandler);
-
-    private native void detachEventHandler();
-
     public native float[] getBands();
 
     public native String[] getPresets();
 
     public native float[] getPreset(int index);
 
-    public static interface OnNativeCrashListener {
-        public void onNativeCrash();
-    }
-
-    public void setOnNativeCrashListener(OnNativeCrashListener l) {
-        mOnNativeCrashListener = l;
-    }
-
-    private void onNativeCrash() {
-        if (mOnNativeCrashListener != null)
-            mOnNativeCrashListener.onNativeCrash();
+    public EventHandler getEventHandler() {
+        return eventHandler;
     }
 
     public String getCachePath() {
@@ -867,4 +825,11 @@ public class LibVLC {
     public native int getTitleCount();
     public native void playerNavigate(int navigate);
 
+    public native String getMeta(int meta);
+
+    public native int setWindowSize(int width, int height);
+
+    /* MediaList */
+    protected native void loadPlaylist(String mrl, ArrayList<String> items);
+    protected native int expandMedia(int position, ArrayList<String> children);
 }
